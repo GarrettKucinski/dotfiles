@@ -1,0 +1,5 @@
+.zshrc.secrets
+*.bak
+.DS_Store
+nvim/config/lazy-lock.json
+nvim/config/starter
