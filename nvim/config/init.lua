@@ -793,6 +793,7 @@ require("lazy").setup({
                 pyright = {},
                 rust_analyzer = {},
                 ts_ls = {},
+                terraformls = {},
                 --
 
                 lua_ls = {
@@ -889,6 +890,9 @@ require("lazy").setup({
                 --
                 -- You can use 'stop_after_first' to run the first available formatter from the list
                 -- javascript = { "prettierd", "prettier", stop_after_first = true },
+                terraform = { "terraform_fmt" },
+                ["terraform-vars"] = { "terraform_fmt" },
+                hcl = { "terraform_fmt" },
             },
         },
     },
@@ -1146,6 +1150,7 @@ require("lazy").setup({
                 "go",
                 "gomod",
                 "gowork",
+                "hcl",
                 "html",
                 "javascript",
                 "json",
@@ -1156,6 +1161,7 @@ require("lazy").setup({
                 "python",
                 "query",
                 "rust",
+                "terraform",
                 "toml",
                 "tsx",
                 "typescript",
