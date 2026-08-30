@@ -1,0 +1,9 @@
+# Neovim Python host + Jupyter kernel deps (molten-nvim).
+# Installed into ~/.venvs/nvim by install.sh via `uv pip install -r`.
+pynvim==0.6.0
+jupyter_client==8.9.1
+ipykernel==7.3.0
+pyperclip==1.11.0
+pnglatex==1.1
+cairosvg==2.9.0
+pillow==12.3.0

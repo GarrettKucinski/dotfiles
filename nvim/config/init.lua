@@ -84,6 +84,29 @@ I hope you enjoy your Neovim journey,
 P.S. You can delete this when you're done too. It's your config now! :)
 --]]
 
+-- Disable legacy remote providers (not needed — LSP runs via Mason, not RPC)
+-- python3 stays enabled: molten-nvim is an RPC remote plugin and needs it.
+vim.g.loaded_node_provider = 0
+vim.g.loaded_ruby_provider = 0
+vim.g.loaded_perl_provider = 0
+
+-- Dedicated venv for the Neovim Python host + Jupyter kernel (pynvim, jupyter_client, ipykernel).
+-- Kept isolated from any project venv so molten-nvim always has what it needs regardless of cwd.
+vim.g.python3_host_prog = vim.fn.expand("~/.venvs/nvim/bin/python")
+
+-- image.nvim's "magick" rock is installed via `luarocks --local --lua-version=5.1 install magick`
+-- (kept out of lazy.nvim's rocks/hererocks integration, which is disabled below). Point LuaJIT
+-- at the luarocks tree so `require("magick")` resolves.
+do
+  local luarocks_prefix = vim.fn.expand("~/.luarocks")
+  package.path = table.concat({
+    package.path,
+    luarocks_prefix .. "/share/lua/5.1/?.lua",
+    luarocks_prefix .. "/share/lua/5.1/?/init.lua",
+  }, ";")
+  package.cpath = package.cpath .. ";" .. luarocks_prefix .. "/lib/lua/5.1/?.so"
+end
+
 -- Set <space> as the leader key
 -- See `:help mapleader`
 --  NOTE: Must happen before plugins are loaded (otherwise wrong leader will be used)
@@ -161,10 +184,17 @@ vim.o.cursorline = true
 -- Minimal number of screen lines to keep above and below the cursor.
 vim.o.scrolloff = 10
 
+-- Set tab width to 4 not 8 so it's not a canyon
+vim.o.tabstop = 4
+vim.o.shiftwidth = 4
+
 -- if performing an operation that would fail due to unsaved changes in the buffer (like `:q`),
 -- instead raise a dialog asking if you wish to save the current file(s)
 -- See `:help 'confirm'`
 vim.o.confirm = true
+
+-- brighter color rendering
+vim.o.termguicolors = true
 
 -- [[ Basic Keymaps ]]
 --  See `:help vim.keymap.set()`
@@ -220,9 +250,11 @@ vim.keymap.set("n", "<leader>tv", "<cmd>vsplit | term<CR>", { desc = "[T]erminal
 
 -- Clear colorcolumn in terminal buffers so it doesn't render as visible vertical lines
 vim.api.nvim_create_autocmd("TermOpen", {
-  callback = function()
-    vim.opt_local.colorcolumn = ""
-  end,
+    callback = function()
+        vim.opt_local.colorcolumn = ""
+        vim.b.miniindentscope_disable = true
+        vim.b.indent_blankline_enabled = false
+    end,
 })
 
 -- NOTE: Some terminals have colliding keymaps or are not able to send distinct keycodes
@@ -244,6 +276,56 @@ vim.api.nvim_create_autocmd("TextYankPost", {
         vim.hl.on_yank()
     end,
 })
+
+-- Custom hover handler that bypasses stylize_markdown so fenced code blocks (```rust ... ```)
+-- reach the buffer intact. With fences present, the markdown Treesitter parser can fire its
+-- injection queries and hand those regions to the Rust parser for per-token colors.
+vim.lsp.handlers["textDocument/hover"] = function(_, result, ctx, _)
+    if not result or not result.contents then return end
+    if vim.api.nvim_get_current_buf() ~= ctx.bufnr then return end
+
+    -- convert_input_to_markdown_lines handles all LSP content types (MarkupContent,
+    -- MarkedString, MarkedString[]) and preserves fenced code blocks verbatim.
+    local lines = vim.lsp.util.convert_input_to_markdown_lines(result.contents)
+    lines = vim.lsp.util.trim_empty_lines(lines)
+    if vim.tbl_isempty(lines) then return end
+
+    local max_w = math.min(math.floor(vim.o.columns * 0.75), 100)
+    local w = 0
+    for _, l in ipairs(lines) do
+        w = math.max(w, vim.fn.strdisplaywidth(l))
+    end
+    w = math.max(math.min(w, max_w), 10)
+    local h = math.min(#lines, math.floor(vim.o.lines * 0.5))
+
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].bufhidden = "wipe"
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+
+    local win = vim.api.nvim_open_win(buf, false, {
+        relative = "cursor", row = 1, col = 0,
+        width = w, height = h,
+        style = "minimal", border = "rounded",
+        focusable = true,
+    })
+    vim.wo[win].conceallevel = 2
+    vim.wo[win].wrap = true
+    vim.wo[win].linebreak = true
+
+    -- Fences are in the buffer now, so Treesitter injection can find rust/etc blocks
+    vim.treesitter.start(buf, "markdown")
+
+    vim.api.nvim_create_autocmd({ "CursorMoved", "BufHidden", "InsertEnter" }, {
+        once = true,
+        buffer = ctx.bufnr,
+        callback = function()
+            pcall(vim.api.nvim_win_close, win, true)
+        end,
+    })
+
+    return buf, win
+end
 
 -- [[ Install `lazy.nvim` plugin manager ]]
 --    See `:help lazy.nvim.txt` or https://github.com/folke/lazy.nvim for more info
@@ -384,10 +466,15 @@ require("lazy").setup({
             spec = {
                 { "<leader>s", group = "[S]earch" },
                 { "<leader>t", group = "[T]oggle" },
-                { "<leader>tc", "<cmd>Telescope colorscheme enable_preview=true<cr>", desc = "[T]heme [C]hange (live preview)" },
+                {
+                    "<leader>tc",
+                    "<cmd>Telescope colorscheme enable_preview=true<cr>",
+                    desc = "[T]heme [C]hange (live preview)",
+                },
                 { "<leader>h", group = "Git [H]unk", mode = { "n", "v" } },
                 { "<leader>b", group = "[B]uffer" },
                 { "<leader>x", group = "Diagnostics / [X]" },
+                { "<leader>D", group = "[D]ebug" },
             },
         },
     },
@@ -609,6 +696,9 @@ require("lazy").setup({
                         )
                     end
 
+                    -- Hover documentation for the symbol under your cursor.
+                    map("K", vim.lsp.buf.hover, "Hover Documentation")
+
                     -- Rename the variable under your cursor.
                     --  Most Language Servers support renaming across files, etc.
                     map("grn", vim.lsp.buf.rename, "[R]e[n]ame")
@@ -791,8 +881,9 @@ require("lazy").setup({
                 -- clangd = {},
                 gopls = {},
                 pyright = {},
-                rust_analyzer = {},
+                -- rust_analyzer is intentionally absent here: rustaceanvim (below) owns it
                 ts_ls = {},
+                terraformls = {},
                 --
 
                 lua_ls = {
@@ -826,13 +917,23 @@ require("lazy").setup({
             -- for you, so that they are available from within Neovim.
             local ensure_installed = vim.tbl_keys(servers or {})
             vim.list_extend(ensure_installed, {
-                "stylua", -- Used to format Lua code
+                "stylua",
+                "dprint",
+                "debugpy",
+                "rust-analyzer", -- installed for rustaceanvim's use, not wired into lspconfig below
+                "delve",
+                "codelldb",
+                "js-debug-adapter",
             })
             require("mason-tool-installer").setup({ ensure_installed = ensure_installed })
 
             require("mason-lspconfig").setup({
                 ensure_installed = {}, -- explicitly set to an empty table (Kickstart populates installs via mason-tool-installer)
                 automatic_installation = false,
+                -- This mason-lspconfig version auto-enables every installed server via
+                -- vim.lsp.enable() regardless of the `handlers` table below, so excluding
+                -- rust_analyzer has to happen here — rustaceanvim attaches it instead.
+                automatic_enable = { exclude = { "rust_analyzer" } },
                 handlers = {
                     function(server_name)
                         local server = servers[server_name] or {}
@@ -884,11 +985,16 @@ require("lazy").setup({
             end,
             formatters_by_ft = {
                 lua = { "stylua" },
-                -- Conform can also run multiple formatters sequentially
-                -- python = { "isort", "black" },
-                --
-                -- You can use 'stop_after_first' to run the first available formatter from the list
-                -- javascript = { "prettierd", "prettier", stop_after_first = true },
+                typescript = { "dprint" },
+                typescriptreact = { "dprint" },
+                javascript = { "dprint" },
+                javascriptreact = { "dprint" },
+                json = { "dprint" },
+                markdown = { "dprint" },
+                toml = { "dprint" },
+                terraform = { "terraform_fmt" },
+                ["terraform-vars"] = { "terraform_fmt" },
+                hcl = { "terraform_fmt" },
             },
         },
     },
@@ -1114,6 +1220,9 @@ require("lazy").setup({
                 options = { try_as_border = true },
             })
 
+            -- Delete a buffer without closing the window/split showing it
+            require("mini.bufremove").setup()
+
             -- Simple and easy statusline.
             --  You could remove this setup call if you don't like it,
             --  and try some other statusline plugin
@@ -1135,6 +1244,7 @@ require("lazy").setup({
     },
     { -- Highlight, edit, and navigate code
         "nvim-treesitter/nvim-treesitter",
+        branch = "master",
         build = ":TSUpdate",
         main = "nvim-treesitter.configs", -- Sets main module to use for opts
         -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
@@ -1146,6 +1256,7 @@ require("lazy").setup({
                 "go",
                 "gomod",
                 "gowork",
+                "hcl",
                 "html",
                 "javascript",
                 "json",
@@ -1156,6 +1267,7 @@ require("lazy").setup({
                 "python",
                 "query",
                 "rust",
+                "terraform",
                 "toml",
                 "tsx",
                 "typescript",
@@ -1216,8 +1328,22 @@ require("lazy").setup({
         event = "VeryLazy",
         opts = {},
         keys = {
-            { "s", mode = { "n", "x", "o" }, function() require("flash").jump() end, desc = "Flash" },
-            { "S", mode = { "n", "x", "o" }, function() require("flash").treesitter() end, desc = "Flash Treesitter" },
+            {
+                "s",
+                mode = { "n", "x", "o" },
+                function()
+                    require("flash").jump()
+                end,
+                desc = "Flash",
+            },
+            {
+                "S",
+                mode = { "n", "x", "o" },
+                function()
+                    require("flash").treesitter()
+                end,
+                desc = "Flash Treesitter",
+            },
         },
     },
 
@@ -1265,13 +1391,26 @@ require("lazy").setup({
             vim.keymap.set("n", "<S-h>", "<cmd>BufferLineCyclePrev<cr>", { desc = "Prev buffer" })
             vim.keymap.set("n", "<leader>bb", "<cmd>BufferLinePick<cr>", { desc = "[B]uffer pick" })
             vim.keymap.set("n", "<leader>bd", function()
-                local bufnr = vim.api.nvim_get_current_buf()
-                require("bufferline").unpin_and_close(bufnr)
-                vim.cmd("bdelete " .. bufnr)
+                require("mini.bufremove").delete(0, false)
             end, { desc = "[B]uffer [D]elete" })
-            vim.keymap.set("n", "<leader>bl", "<cmd>BufferLineCloseLeft<cr>", { desc = "[B]uffer close [L]eft" })
-            vim.keymap.set("n", "<leader>br", "<cmd>BufferLineCloseRight<cr>", { desc = "[B]uffer close [R]ight" })
-            vim.keymap.set("n", "<leader>bo", "<cmd>BufferLineCloseOthers<cr>", { desc = "[B]uffer close [O]thers" })
+            vim.keymap.set(
+                "n",
+                "<leader>bl",
+                "<cmd>BufferLineCloseLeft<cr>",
+                { desc = "[B]uffer close [L]eft" }
+            )
+            vim.keymap.set(
+                "n",
+                "<leader>br",
+                "<cmd>BufferLineCloseRight<cr>",
+                { desc = "[B]uffer close [R]ight" }
+            )
+            vim.keymap.set(
+                "n",
+                "<leader>bo",
+                "<cmd>BufferLineCloseOthers<cr>",
+                { desc = "[B]uffer close [O]thers" }
+            )
             -- Jump to buffer by number
             for i = 1, 9 do
                 vim.keymap.set("n", "<leader>" .. i, function()
@@ -1290,14 +1429,26 @@ require("lazy").setup({
             local harpoon = require("harpoon")
             harpoon:setup()
 
-            vim.keymap.set("n", "<leader>m", function() harpoon:list():add() end, { desc = "[M]ark file (harpoon)" })
-            vim.keymap.set("n", "<leader>p", function() harpoon.ui:toggle_quick_menu(harpoon:list()) end, { desc = "Harpoon [P]icker" })
+            vim.keymap.set("n", "<leader>m", function()
+                harpoon:list():add()
+            end, { desc = "[M]ark file (harpoon)" })
+            vim.keymap.set("n", "<leader>p", function()
+                harpoon.ui:toggle_quick_menu(harpoon:list())
+            end, { desc = "Harpoon [P]icker" })
 
             -- Jump to harpooned files (<C-number> doesn't work in most terminals)
-            vim.keymap.set("n", "<leader>j1", function() harpoon:list():select(1) end, { desc = "[J]ump to harpoon file 1" })
-            vim.keymap.set("n", "<leader>j2", function() harpoon:list():select(2) end, { desc = "[J]ump to harpoon file 2" })
-            vim.keymap.set("n", "<leader>j3", function() harpoon:list():select(3) end, { desc = "[J]ump to harpoon file 3" })
-            vim.keymap.set("n", "<leader>j4", function() harpoon:list():select(4) end, { desc = "[J]ump to harpoon file 4" })
+            vim.keymap.set("n", "<leader>j1", function()
+                harpoon:list():select(1)
+            end, { desc = "[J]ump to harpoon file 1" })
+            vim.keymap.set("n", "<leader>j2", function()
+                harpoon:list():select(2)
+            end, { desc = "[J]ump to harpoon file 2" })
+            vim.keymap.set("n", "<leader>j3", function()
+                harpoon:list():select(3)
+            end, { desc = "[J]ump to harpoon file 3" })
+            vim.keymap.set("n", "<leader>j4", function()
+                harpoon:list():select(4)
+            end, { desc = "[J]ump to harpoon file 4" })
 
             -- Telescope picker for all harpooned files
             vim.keymap.set("n", "<leader>fh", function()
@@ -1306,12 +1457,14 @@ require("lazy").setup({
                 for _, item in ipairs(harpoon:list().items) do
                     table.insert(file_paths, item.value)
                 end
-                require("telescope.pickers").new({}, {
-                    prompt_title = "Harpoon",
-                    finder = require("telescope.finders").new_table({ results = file_paths }),
-                    previewer = conf.file_previewer({}),
-                    sorter = conf.generic_sorter({}),
-                }):find()
+                require("telescope.pickers")
+                    .new({}, {
+                        prompt_title = "Harpoon",
+                        finder = require("telescope.finders").new_table({ results = file_paths }),
+                        previewer = conf.file_previewer({}),
+                        sorter = conf.generic_sorter({}),
+                    })
+                    :find()
             end, { desc = "[F]ind [H]arpoon files" })
         end,
     },
@@ -1323,24 +1476,201 @@ require("lazy").setup({
         cmd = "Trouble",
         keys = {
             { "<leader>xx", "<cmd>Trouble diagnostics toggle<cr>", desc = "Diagnostics (Trouble)" },
-            { "<leader>xX", "<cmd>Trouble diagnostics toggle filter.buf=0<cr>", desc = "Buffer diagnostics (Trouble)" },
+            {
+                "<leader>xX",
+                "<cmd>Trouble diagnostics toggle filter.buf=0<cr>",
+                desc = "Buffer diagnostics (Trouble)",
+            },
             { "<leader>xL", "<cmd>Trouble loclist toggle<cr>", desc = "Location list (Trouble)" },
             { "<leader>xQ", "<cmd>Trouble qflist toggle<cr>", desc = "Quickfix list (Trouble)" },
         },
         opts = {},
     },
 
-    -- NOTE: The import below can automatically add your own plugins, configuration, etc from `lua/custom/plugins/*.lua`
+    -- Rust LSP + DAP (owns rust-analyzer; see the `rust_analyzer` no-op handler above)
+    {
+        "mrcjkb/rustaceanvim",
+        ft = { "rust" },
+        init = function()
+            local mason_pkg = vim.fn.stdpath("data") .. "/mason/packages/codelldb"
+            local codelldb_path = mason_pkg .. "/extension/adapter/codelldb"
+            local liblldb_path = mason_pkg .. "/extension/lldb/lib/liblldb.dylib"
+            vim.g.rustaceanvim = {
+                dap = {
+                    adapter = require("rustaceanvim.config").get_codelldb_adapter(
+                        codelldb_path,
+                        liblldb_path
+                    ),
+                },
+            }
+        end,
+    },
+
+    -- Debugging (DAP) — Python, Go, Node/React. Rust is handled by rustaceanvim above,
+    -- which drives the same underlying nvim-dap session for :RustLsp debuggables/debug.
+    {
+        "mfussenegger/nvim-dap",
+        dependencies = {
+            "rcarriga/nvim-dap-ui",
+            "nvim-neotest/nvim-nio",
+            "theHamsta/nvim-dap-virtual-text",
+            "mfussenegger/nvim-dap-python",
+            "leoluz/nvim-dap-go",
+        },
+        config = function()
+            local dap = require("dap")
+            local dapui = require("dapui")
+
+            dapui.setup()
+            require("nvim-dap-virtual-text").setup()
+
+            -- Auto-open/close the UI around a debug session instead of toggling it by hand
+            dap.listeners.after.event_initialized["dapui_config"] = dapui.open
+            dap.listeners.before.event_terminated["dapui_config"] = dapui.close
+            dap.listeners.before.event_exited["dapui_config"] = dapui.close
+
+            vim.fn.sign_define("DapBreakpoint", { text = "●", texthl = "DiagnosticError" })
+            vim.fn.sign_define("DapBreakpointCondition", { text = "◐", texthl = "DiagnosticWarn" })
+            vim.fn.sign_define("DapStopped", { text = "▶", texthl = "DiagnosticInfo", linehl = "Visual" })
+
+            -- == Python ==
+            -- debugpy is installed by Mason (see ensure_installed above). This is the adapter's
+            -- own interpreter, separate from the project venv the debuggee actually runs under.
+            require("dap-python").setup(
+                vim.fn.stdpath("data") .. "/mason/packages/debugpy/venv/bin/python"
+            )
+
+            -- Run the debuggee with the project's own venv so it sees FastAPI/uvicorn/pytest.
+            -- A function value is resolved by nvim-dap at launch time, so this re-evaluates
+            -- per-session rather than baking in whatever cwd was active when nvim started.
+            local function venv_python()
+                return vim.fn.getcwd() .. "/.venv/bin/python"
+            end
+
+            vim.list_extend(dap.configurations.python, {
+                {
+                    type = "python",
+                    request = "launch",
+                    name = "FastAPI (uvicorn)",
+                    module = "uvicorn",
+                    args = { "app.main:app", "--host", "0.0.0.0", "--port", "8000" },
+                    pythonPath = venv_python,
+                    justMyCode = false,
+                    console = "integratedTerminal",
+                },
+            })
+
+            -- == Go ==
+            require("dap-go").setup({
+                delve = {
+                    path = vim.fn.stdpath("data") .. "/mason/packages/delve/dlv",
+                },
+            })
+
+            -- == Node / React ==
+            -- One vscode-js-debug server backs both request types below; nvim-dap picks
+            -- the session flavor (plain node vs. a Chrome target) from each config's `type`.
+            local js_debug_adapter = vim.fn.stdpath("data")
+                .. "/mason/packages/js-debug-adapter/js-debug-adapter"
+            dap.adapters["pwa-node"] = {
+                type = "server",
+                host = "localhost",
+                port = "${port}",
+                executable = {
+                    command = js_debug_adapter,
+                    args = { "${port}" },
+                },
+            }
+            dap.adapters["pwa-chrome"] = dap.adapters["pwa-node"]
+
+            for _, language in ipairs({
+                "javascript",
+                "typescript",
+                "javascriptreact",
+                "typescriptreact",
+            }) do
+                dap.configurations[language] = {
+                    {
+                        type = "pwa-node",
+                        request = "launch",
+                        name = "Launch file",
+                        program = "${file}",
+                        cwd = "${workspaceFolder}",
+                    },
+                    {
+                        type = "pwa-node",
+                        request = "attach",
+                        name = "Attach to process",
+                        processId = require("dap.utils").pick_process,
+                        cwd = "${workspaceFolder}",
+                    },
+                    {
+                        type = "pwa-chrome",
+                        request = "launch",
+                        name = "Launch Chrome against dev server",
+                        url = function()
+                            return vim.fn.input("URL to debug: ", "http://localhost:5173")
+                        end,
+                        webRoot = "${workspaceFolder}",
+                        protocol = "inspector",
+                        sourceMaps = true,
+                    },
+                }
+            end
+
+            -- Per-project .vscode/launch.json files (common in JS/TS and Go repos checked out
+            -- elsewhere) are now read automatically and on-demand by nvim-dap's built-in
+            -- "dap.launch.json" provider — no setup call needed, just the type->filetype
+            -- mapping for adapter type strings that don't already match a vim filetype.
+            local vscode_ext = require("dap.ext.vscode")
+            vscode_ext.type_to_filetypes["pwa-node"] =
+                { "javascript", "typescript", "javascriptreact", "typescriptreact" }
+            vscode_ext.type_to_filetypes["pwa-chrome"] =
+                { "javascript", "typescript", "javascriptreact", "typescriptreact" }
+            vscode_ext.type_to_filetypes["delve"] = { "go" }
+
+            -- == Keymaps ==
+            -- F-keys instead of <leader>d: <leader>d is already "save file" in this config.
+            vim.keymap.set("n", "<F5>", dap.continue, { desc = "Debug: Continue/Start" })
+            vim.keymap.set("n", "<F9>", dap.toggle_breakpoint, { desc = "Debug: Toggle Breakpoint" })
+            vim.keymap.set("n", "<F10>", dap.step_over, { desc = "Debug: Step Over" })
+            vim.keymap.set("n", "<F11>", dap.step_into, { desc = "Debug: Step Into" })
+            vim.keymap.set("n", "<F12>", dap.step_out, { desc = "Debug: Step Out" })
+
+            vim.keymap.set("n", "<leader>Dt", dap.terminate, { desc = "[D]ebug: [T]erminate" })
+            vim.keymap.set("n", "<leader>Du", dapui.toggle, { desc = "[D]ebug: Toggle [U]I" })
+            vim.keymap.set(
+                "n",
+                "<leader>Dr",
+                dap.repl.toggle,
+                { desc = "[D]ebug: Toggle [R]epl" }
+            )
+            vim.keymap.set("n", "<leader>Db", function()
+                dap.set_breakpoint(vim.fn.input("Breakpoint condition: "))
+            end, { desc = "[D]ebug: Conditional [B]reakpoint" })
+
+            vim.keymap.set("n", "<leader>Dpm", function()
+                require("dap-python").test_method()
+            end, { desc = "[D]ebug: [P]ython test [M]ethod" })
+            vim.keymap.set("n", "<leader>Dpc", function()
+                require("dap-python").test_class()
+            end, { desc = "[D]ebug: [P]ython test [C]lass" })
+            vim.keymap.set("n", "<leader>Dgt", function()
+                require("dap-go").debug_test()
+            end, { desc = "[D]ebug: [G]o [T]est" })
+        end,
+    },
+
+    -- NOTE: The import below automatically adds your own plugins, configuration, etc from `lua/plugins/*.lua`
     --    This is the easiest way to modularize your config.
-    --
-    --  Uncomment the following line and add your plugins to `lua/custom/plugins/*.lua` to get going.
-    -- { import = 'custom.plugins' },
+    { import = 'plugins' },
     --
     -- For additional information with loading, sourcing and examples see `:help lazy.nvim-🔌-plugin-spec`
     -- Or use telescope!
     -- In normal mode type `<space>sh` then write `lazy.nvim-plugin`
     -- you can continue same window with `<space>sr` which resumes last telescope search
 }, {
+    rocks = { enabled = false },
     ui = {
         -- If you are using a Nerd Font: set icons to an empty table which will use the
         -- default lazy.nvim defined Nerd Font icons, otherwise define a unicode icons table
@@ -1361,6 +1691,18 @@ require("lazy").setup({
         },
     },
 })
+
+-- Neovim 0.12 changed TSNode internals; stale nodes from reparsed injection trees
+-- lose their :range() method, crashing nvim-treesitter's predicate handlers.
+-- Wrapping get_node_text with pcall catches this silently instead of spamming errors.
+do
+    local orig = vim.treesitter.get_node_text
+    vim.treesitter.get_node_text = function(node, source, opts)
+        if node == nil then return "" end
+        local ok, result = pcall(orig, node, source, opts)
+        return ok and result or ""
+    end
+end
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et

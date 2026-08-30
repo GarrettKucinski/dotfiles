@@ -37,6 +37,7 @@ symlink() {
 
 symlink "$DOTFILES/nvim/config"        "$HOME/.config/nvim"
 symlink "$DOTFILES/tmux/tmux.conf"     "$HOME/.tmux.conf"
+symlink "$DOTFILES/zellij/config.kdl"  "$HOME/.config/zellij/config.kdl"
 symlink "$DOTFILES/starship/starship.toml" "$HOME/.config/starship.toml"
 symlink "$DOTFILES/zsh/.zshrc"         "$HOME/.zshrc"
 symlink "$DOTFILES/zsh/aliases.sh"     "$HOME/.config/zsh/aliases.sh"
@@ -65,6 +66,22 @@ fi
 if ! command -v cargo &>/dev/null; then
     echo "==> Installing Rust toolchain..."
     rustup-init -y
+fi
+
+# ─── Neovim Python venv (molten-nvim / Jupyter kernel) ─────
+NVIM_VENV="$HOME/.venvs/nvim"
+if [ ! -d "$NVIM_VENV" ]; then
+    echo "==> Creating $NVIM_VENV..."
+    uv venv --python 3.13 "$NVIM_VENV"
+fi
+echo "==> Syncing $NVIM_VENV packages..."
+uv pip install --python "$NVIM_VENV/bin/python" -r "$DOTFILES/nvim/config/requirements.txt"
+"$NVIM_VENV/bin/python" -m ipykernel install --user --name python3 --display-name "Python 3 (nvim)"
+
+# ─── image.nvim magick rock ─────────────────────────────────
+if [ ! -d "$HOME/.luarocks/lib/lua/5.1" ]; then
+    echo "==> Building magick luarocks rock..."
+    luarocks --local --lua-version=5.1 install magick
 fi
 
 echo ""

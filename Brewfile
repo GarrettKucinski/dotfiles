@@ -18,6 +18,13 @@ brew "rustup"
 # ─── Languages ────────────────────────────────────────────
 brew "go"
 brew "python@3.13"
+brew "uv"
+
+# ─── Neovim / Jupyter (molten-nvim, image.nvim) ────────────
+brew "imagemagick"
+brew "luarocks"
+brew "pkg-config"
+brew "jupytext"
 
 # ─── Docker / K8s ─────────────────────────────────────────
 brew "docker"
