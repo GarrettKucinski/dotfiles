@@ -924,6 +924,7 @@ require("lazy").setup({
                 "delve",
                 "codelldb",
                 "js-debug-adapter",
+                "ruff", -- used by conform for python formatting, see conform.nvim setup below
             })
             require("mason-tool-installer").setup({ ensure_installed = ensure_installed })
 
@@ -985,6 +986,7 @@ require("lazy").setup({
             end,
             formatters_by_ft = {
                 lua = { "stylua" },
+                python = { "ruff_fix", "ruff_format" },
                 typescript = { "dprint" },
                 typescriptreact = { "dprint" },
                 javascript = { "dprint" },
