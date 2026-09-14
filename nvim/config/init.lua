@@ -880,7 +880,7 @@ require("lazy").setup({
             local servers = {
                 -- clangd = {},
                 gopls = {},
-                pyright = {},
+                -- pyright/Pylance is intentionally absent: mypy (via nvim-lint below) owns python types
                 -- rust_analyzer is intentionally absent here: rustaceanvim (below) owns it
                 ts_ls = {},
                 terraformls = {},
@@ -925,6 +925,7 @@ require("lazy").setup({
                 "codelldb",
                 "js-debug-adapter",
                 "ruff", -- used by conform for python formatting, see conform.nvim setup below
+                "mypy", -- used by nvim-lint for python type diagnostics, see nvim-lint setup below
             })
             require("mason-tool-installer").setup({ ensure_installed = ensure_installed })
 
@@ -934,7 +935,8 @@ require("lazy").setup({
                 -- This mason-lspconfig version auto-enables every installed server via
                 -- vim.lsp.enable() regardless of the `handlers` table below, so excluding
                 -- rust_analyzer has to happen here — rustaceanvim attaches it instead.
-                automatic_enable = { exclude = { "rust_analyzer" } },
+                -- pyright (Pylance's engine) is excluded too: mypy owns python types.
+                automatic_enable = { exclude = { "rust_analyzer", "pyright" } },
                 handlers = {
                     function(server_name)
                         local server = servers[server_name] or {}
@@ -999,6 +1001,29 @@ require("lazy").setup({
                 hcl = { "terraform_fmt" },
             },
         },
+    },
+
+    { -- Linting
+        "mfussenegger/nvim-lint",
+        event = { "BufWritePost", "BufReadPost", "InsertLeave" },
+        config = function()
+            local lint = require("lint")
+            lint.linters_by_ft = {
+                python = { "mypy" },
+            }
+
+            local lint_augroup = vim.api.nvim_create_augroup("lint", { clear = true })
+            vim.api.nvim_create_autocmd({ "BufWritePost", "BufReadPost", "InsertLeave" }, {
+                group = lint_augroup,
+                callback = function()
+                    -- Only run the linter in buffers that you can modify in order to
+                    -- avoid superfluous noise, notably within the handler for /explain
+                    if vim.opt_local.modifiable:get() then
+                        lint.try_lint()
+                    end
+                end,
+            })
+        end,
     },
 
     { -- Autocompletion
