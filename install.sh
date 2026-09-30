@@ -68,6 +68,12 @@ if ! command -v cargo &>/dev/null; then
     rustup-init -y
 fi
 
+# ─── Global npm CLIs (codex.nvim) ─────────────────────────
+if ! command -v codex &>/dev/null; then
+    echo "==> Installing Codex CLI..."
+    npm install -g @openai/codex
+fi
+
 # ─── Neovim Python venv (molten-nvim / Jupyter kernel) ─────
 NVIM_VENV="$HOME/.venvs/nvim"
 if [ ! -d "$NVIM_VENV" ]; then
