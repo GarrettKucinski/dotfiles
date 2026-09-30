@@ -1744,5 +1744,8 @@ do
     end
 end
 
+require("config.worktree_sidebar").setup()
+require("config.worktree_picker").setup()
+
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
