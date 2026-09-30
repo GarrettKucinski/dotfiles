@@ -932,7 +932,6 @@ require("lazy").setup({
             local ensure_installed = vim.tbl_keys(servers or {})
             vim.list_extend(ensure_installed, {
                 "stylua",
-                "dprint",
                 "debugpy",
                 "rust-analyzer", -- installed for rustaceanvim's use, not wired into lspconfig below
                 "delve",
@@ -995,16 +994,24 @@ require("lazy").setup({
             formatters_by_ft = {
                 lua = { "stylua" },
                 python = { "ruff_fix", "ruff_format" },
-                typescript = { "dprint" },
-                typescriptreact = { "dprint" },
-                javascript = { "dprint" },
-                javascriptreact = { "dprint" },
-                json = { "dprint" },
-                markdown = { "dprint" },
-                toml = { "dprint" },
+                typescript = { "deno_fmt" },
+                typescriptreact = { "deno_fmt" },
+                javascript = { "deno_fmt" },
+                javascriptreact = { "deno_fmt" },
+                json = { "deno_fmt" },
+                markdown = { "deno_fmt" },
                 terraform = { "terraform_fmt" },
                 ["terraform-vars"] = { "terraform_fmt" },
                 hcl = { "terraform_fmt" },
+            },
+            formatters = {
+                -- Run from the nearest deno.json so its `fmt` options are picked up
+                -- regardless of nvim's cwd.
+                deno_fmt = {
+                    cwd = function(self, ctx)
+                        return require("conform.util").root_file({ "deno.json", "deno.jsonc" })(self, ctx)
+                    end,
+                },
             },
         },
     },
@@ -1109,7 +1116,7 @@ require("lazy").setup({
             },
 
             sources = {
-                default = { "lsp", "path", "snippets", "lazydev" },
+                default = { "lsp", "path", "snippets", "lazydev", "buffer" },
                 providers = {
                     lazydev = { module = "lazydev.integrations.blink", score_offset = 100 },
                 },

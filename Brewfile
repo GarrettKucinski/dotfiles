@@ -19,6 +19,7 @@ brew "rustup"
 brew "go"
 brew "python@3.13"
 brew "uv"
+brew "deno"
 
 # ─── Neovim / Jupyter (molten-nvim, image.nvim) ────────────
 brew "imagemagick"
