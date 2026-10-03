@@ -40,6 +40,7 @@ Anything sensitive (API keys, work aliases, machine-specific paths) lives in `~/
 | `;e` | Toggle file explorer |
 | `;sg` | Live grep |
 | `;sf` | Find files |
+| `;tm` | Toggle markdown rendering |
 | `;gw` | Worktree picker (`<C-a>` toggles all repos) |
 | `;xx` | Toggle Trouble diagnostics |
 | `gl` | Show diagnostic float |
