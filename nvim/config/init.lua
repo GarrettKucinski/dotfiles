@@ -240,6 +240,8 @@ vim.keymap.set("n", "<leader>|", "<C-w>v", { desc = "Split vertical" })
 vim.keymap.set("n", "<leader>-", "<C-w>s", { desc = "Split horizontal" })
 vim.keymap.set("n", "<leader>w", "<C-w>q", { desc = "Close split" })
 vim.keymap.set("n", "<leader>=", "<C-w>=", { desc = "Equal split sizes" })
+-- <C-w>f zoom toggle and sticky <C-w></>/+/- resize mode
+require("config.window").setup()
 
 -- Save
 vim.keymap.set("n", "<leader>d", "<cmd>w<CR>", { desc = "[D]isk save" })
