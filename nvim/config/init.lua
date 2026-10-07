@@ -1469,7 +1469,8 @@ require("lazy").setup({
         dependencies = { "nvim-lua/plenary.nvim" },
         config = function()
             local harpoon = require("harpoon")
-            harpoon:setup()
+            -- Defaults discard quick-menu edits on q/<Esc> and only persist on exit.
+            harpoon:setup({ settings = { save_on_toggle = true, sync_on_ui_close = true } })
 
             vim.keymap.set("n", "<leader>m", function()
                 harpoon:list():add()
